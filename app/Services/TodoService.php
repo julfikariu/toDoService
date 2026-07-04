@@ -3,10 +3,15 @@
 namespace App\Services;
 
 use App\Models\Todo;
-use App\Events\TodoCreated;
+use App\Contracts\EventPublisherInterface;
+use Illuminate\Support\Carbon;
 
 class TodoService
 {
+    public function __construct(
+        protected EventPublisherInterface $publisher
+    ) {}
+
     /**
      * Create a new Todo.
      *
@@ -21,7 +26,17 @@ class TodoService
             'status' => 'pending',
         ]);
 
-        event(new TodoCreated());
+        $payload = [
+            'event' => 'TodoCreated',
+            'data' => [
+                'todo_id' => $todo->id,
+                'title' => $todo->title,
+                'email' => $data['email'],
+            ],
+            'timestamp' => Carbon::now('UTC')->toIso8601String(),
+        ];
+
+        $this->publisher->publish('queue:todo-events', $payload);
 
         return $todo;
     }
