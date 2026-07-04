@@ -1,0 +1,115 @@
+
+services:
+  # ---------------------------------------------------------
+  # Application Service (PHP-FPM)
+  # ---------------------------------------------------------
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # Target 'base' stage for local development. This avoids copying
+      # production files into the image and allows mapping local volumes.
+      target: base
+    image: laravel-app
+    container_name: laravel_app
+    restart: unless-stopped
+    working_dir: /var/www
+    volumes:
+      # Map local code to container for instant updates without rebuilding
+      - ./:/var/www
+      # Map custom PHP configurations
+      - ./docker/php/local.ini:/usr/local/etc/php/conf.d/local.ini
+    environment:
+      - APP_ENV=${APP_ENV:-local}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    networks:
+      - laravel-network
+
+  # ---------------------------------------------------------
+  # Nginx Web Server Service
+  # ---------------------------------------------------------
+  webserver:
+    image: nginx:alpine
+    container_name: laravel_nginx
+    restart: unless-stopped
+    ports:
+      - "8000:80"
+    volumes:
+      # Map code so Nginx can serve static assets directly and index.php
+      - ./:/var/www
+      # Map optimized Nginx configuration
+      - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf
+    depends_on:
+      - app
+    networks:
+      - laravel-network
+
+  # ---------------------------------------------------------
+  # Database Service (MySQL)
+  # ---------------------------------------------------------
+  db:
+    image: mysql:8.0
+    container_name: laravel_db
+    restart: unless-stopped
+    ports:
+      - "33060:3306"
+    environment:
+      # Values are safely read from your `.env` file
+      MYSQL_DATABASE: ${DB_DATABASE:-laravel}
+      MYSQL_ROOT_PASSWORD: ${DB_PASSWORD:-root}
+      MYSQL_USER: ${DB_USERNAME:-laravel}
+      MYSQL_PASSWORD: ${DB_PASSWORD:-secret}
+    volumes:
+      # Persistent named volume to prevent data loss on teardown
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-p${DB_PASSWORD:-root}"]
+      retries: 3
+      timeout: 5s
+    networks:
+      - laravel-network
+
+  # ---------------------------------------------------------
+  # Redis Cache & Queue Service
+  # ---------------------------------------------------------
+  redis:
+    image: redis:alpine
+    container_name: laravel_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - laravel-network
+
+  # ---------------------------------------------------------
+  # Mailpit (Local Mail Testing)
+  # ---------------------------------------------------------
+  mailpit:
+    image: axllent/mailpit
+    container_name: laravel_mailpit
+    restart: unless-stopped
+    ports:
+      - "1025:1025" # SMTP Port for Laravel Mailer
+      - "8025:8025" # Web UI to view emails locally
+    networks:
+      - laravel-network
+
+# ---------------------------------------------------------
+# Persistent Volumes Definitions
+# ---------------------------------------------------------
+volumes:
+  db_data:
+  redis_data:
+
+# ---------------------------------------------------------
+# Shared Network Definitions
+# ---------------------------------------------------------
+networks:
+  laravel-network:
+    driver: bridge
